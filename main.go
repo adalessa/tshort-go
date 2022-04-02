@@ -8,8 +8,11 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 )
+
+const BINDED_SESSION_PATH = "/tmp/tmux-projects.json"
 
 type Project struct {
 	Name  string
@@ -17,92 +20,96 @@ type Project struct {
 	Path  string
 }
 
-type Projects map[string]Project
+type BindedProjects map[string]Project
 
 func main() {
-	// move to a function to clean the code just get the bindedProjects
-	file := "/tmp/tmux-projects.json"
-	content, err := ioutil.ReadFile(file)
-	bindProjects := Projects{}
-	if err != nil {
-		if err.Error() == "open /tmp/tmux-projects.json: no such file or directory" {
-			// create file
-			f, err := os.Create(file)
-			if err != nil {
-				fmt.Println(err)
-				return
-			}
-			// write empty projects
-			json.NewEncoder(f).Encode(bindProjects)
-			f.Close()
-			content, _ = ioutil.ReadFile(file)
-		} else {
-			fmt.Println(err)
-			return
-		}
-	}
-	err = json.Unmarshal(content, &bindProjects)
+	projects, err := getBindedSessions()
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
+	projects = removedDeletedSessions(projects)
 
-	// improve with a switch to select action
-	if len(os.Args) == 1 {
-		_, err := runSelection()
+	switch {
+	case len(os.Args) == 1:
+		project, err := selectProject()
 		if err != nil {
 			fmt.Println(err)
+			return
 		}
-	}
-
-	// read parameter from command line
-	if len(os.Args) > 3 {
-		fmt.Println("Usage: tmux-projects <action> <key>")
-	}
-	action := os.Args[1]
-	// actions = [list, switch, bind]
-	if action == "list" {
-		fmt.Println(string(content))
-	} else if action == "switch" {
-		if len(os.Args) > 3 {
-			fmt.Println("Usage: tmux-projects switch <key>")
-		}
-		if len(os.Args) == 3 {
+		fmt.Printf("Switched to %s\n", project.Title)
+	case len(os.Args) >= 2:
+		action := os.Args[1]
+		switch action {
+		case "list":
+			// json.NewEncoder(os.Stdout).Encode(projects)
+			var bindingsStr []string
+			for key, project := range projects {
+				bindingsStr = append(bindingsStr, fmt.Sprintf("[#%s %s]", key, project.Name))
+			}
+			sort.Strings(bindingsStr)
+			fmt.Println(strings.Join(bindingsStr, " | "))
+		case "switch":
+			if len(os.Args) > 3 {
+				fmt.Println("Usage: tshort switch <key>")
+				return
+			}
 			key := os.Args[2]
-			if project, ok := bindProjects[key]; ok {
-				switchOrCreateSession(project)
+			if project, ok := projects[key]; ok {
+				changeToSession(project)
 			} else {
-				fmt.Println("Project not found")
+				project, err := selectProject()
+				if err != nil {
+					fmt.Println(err)
+					return
+				}
+				projects[key] = project
 			}
-		}
-	} else if action == "bind" {
-		if len(os.Args) > 3 {
-			fmt.Println("Usage: tmux-projects bind <key>")
-		}
-		key := os.Args[2]
-		if len(os.Args) == 3 {
-			project, err := runSelection()
-			if err != nil {
-				fmt.Println(err)
-				return
-			}
-			bindProjects[key] = project
-
-			content, err := json.Marshal(bindProjects)
-			if err != nil {
-				fmt.Println(err)
-				return
-			}
-			err = ioutil.WriteFile(file, content, 0644)
-			if err != nil {
-				fmt.Println(err)
-				return
-			}
+			// TODO: add bind command
+			// the question is what project to bind ?
+			// option create a project using the session name, search a project using the session name
+			// if no project found create a simple with the name as it is
+			// the path try to get cwd
+		default:
+			fmt.Println("Usage: tshort [list|switch]")
 		}
 	}
+	saveBindedSessions(projects)
 }
 
-func runSelection() (Project, error) {
+func saveBindedSessions(projects BindedProjects) error {
+	content, err := json.Marshal(projects)
+	if err != nil {
+		return err
+	}
+	err = ioutil.WriteFile(BINDED_SESSION_PATH, content, 0644)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+	return nil
+}
+
+func getBindedSessions() (projects BindedProjects, err error) {
+	content, err := ioutil.ReadFile(BINDED_SESSION_PATH)
+	if err != nil {
+		if err.Error() == fmt.Sprintf("open %s: no such file or directory", BINDED_SESSION_PATH) {
+			return make(BindedProjects), nil
+		} else {
+			fmt.Println(err)
+			return projects, err
+		}
+	}
+
+	err = json.Unmarshal(content, &projects)
+	if err != nil {
+		return projects, err
+	}
+
+	return projects, nil
+}
+
+func selectProject() (Project, error) {
 	directory := fmt.Sprintf("/home/%s/code", os.Getenv("USER"))
 	projects := getProjects(directory)
 
@@ -125,35 +132,20 @@ func runSelection() (Project, error) {
 	if project.Name == "" {
 		return Project{}, errors.New("Project not found")
 	}
-	switchOrCreateSession(project)
+	changeToSession(project)
 
 	return project, nil
 }
 
-func switchOrCreateSession(project Project) {
+func changeToSession(project Project) {
 	os.Chdir(project.Path)
-	cmd := exec.Command("tmux", "has-session", "-t", project.Name)
-	result, _ := cmd.Output()
-	if string(result) != "0\n" {
-		cmd = exec.Command("tmux", "new-session", "-d", "-s", project.Name, "nvim .")
-		cmd.Run()
+	if !sessionExists(project.Name) {
+		exec.Command("tmux", "new-session", "-d", "-s", project.Name, "nvim .").Run()
 	}
-	cmd = exec.Command("tmux", "switch-client", "-t", project.Name)
-	cmd.Run()
-	// TODO trying to create the window fails because there is no command has-window
-	// cmd = exec.Command("tmux", "has-window", "-t", project.Name, "-n", "vim")
-	// result, _ = cmd.Output()
-	// fmt.Print(result)
-	// if string(result) != "0\n" {
-	// 	cmd = exec.Command("tmux", "new-window", "-t", project.Name, "-n", "vim", "nvim .")
-	// 	cmd.Run()
-	// }
-	// cmd = exec.Command("tmux", "switch-client", "-t", project.Name, "-w", "vim")
-	// cmd.Run()
+	exec.Command("tmux", "switch-client", "-t", project.Name).Run()
 }
 
-func getProjects(directory string) []Project {
-	var result []Project
+func getProjects(directory string) (result []Project) {
 	languages := getDirectories(directory)
 	for _, language := range languages {
 		if language != "go" {
@@ -206,4 +198,29 @@ func withFilter(command string, input func(in io.WriteCloser)) []string {
 	}()
 	result, _ := cmd.Output()
 	return strings.Split(string(result), "\n")
+}
+
+func sessionExists(name string) bool {
+	cmd := exec.Command("tmux", "has-session", "-t", name)
+	// var stdout, stderr bytes.Buffer
+	// cmd.Stdout = &stdout
+	// cmd.Stderr = &stderr
+	err := cmd.Run()
+	// outStr, errStr := string(stdout.Bytes()), string(stderr.Bytes())
+	// fmt.Printf("Tmux out: %s\n", outStr)
+	// fmt.Printf("Tmux err: %s\n", errStr)
+	if err != nil {
+		// fmt.Println(err)
+		return false
+	}
+	return true
+}
+
+func removedDeletedSessions(bindedProjects BindedProjects) BindedProjects {
+	for key, project := range bindedProjects {
+		if !sessionExists(project.Name) {
+			delete(bindedProjects, key)
+		}
+	}
+	return bindedProjects
 }
