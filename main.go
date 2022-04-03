@@ -41,8 +41,9 @@ func main() {
 	case len(os.Args) >= 2:
 		action := os.Args[1]
 		switch action {
+		case "list-json":
+			json.NewEncoder(os.Stdout).Encode(projects)
 		case "list":
-			// json.NewEncoder(os.Stdout).Encode(projects)
 			var bindingsStr []string
 			for key, project := range projects {
 				bindingsStr = append(bindingsStr, fmt.Sprintf("[#%s %s]", key, project.Name))
