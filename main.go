@@ -141,7 +141,7 @@ func selectProject() (Project, error) {
 func changeToSession(project Project) {
 	os.Chdir(project.Path)
 	if !sessionExists(project.Name) {
-		exec.Command("tmux", "new-session", "-d", "-s", project.Name, "nvim .").Run()
+		exec.Command("tmux", "new-session", "-d", "-s", project.Name, "nvim").Run()
 	}
 	exec.Command("tmux", "switch-client", "-t", project.Name).Run()
 }
