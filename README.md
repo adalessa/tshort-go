@@ -21,3 +21,6 @@ bind-key p run-shell  'tmux popup -E tshort switch 4'
 ```
 
 Para agregar a la barra de status utilizar el comando `tshort list`
+
+## TODO
+- [ ] Permitir editar las keys (Pedir input de teclas | fzf keybindings)
