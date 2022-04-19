@@ -48,14 +48,13 @@ func (c *BindCommand) Run() error {
 		return fmt.Errorf("error loading projects %w", err)
 	}
 
-	if project, ok := bindedProjects[c.key]; ok {
-		tmux.ChangeToSession(project.Path, project.Name)
-
-		return nil
-	}
-
 	var project project.Project
 	if c.session == "" {
+		if project, ok := bindedProjects[c.key]; ok {
+			tmux.ChangeToSession(project.Path, project.Name)
+
+			return nil
+		}
 		projects, err := c.pm.GetProjects()
 		if err != nil {
 			return fmt.Errorf("Error getting projects, %w", err)
