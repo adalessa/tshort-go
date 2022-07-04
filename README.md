@@ -24,3 +24,4 @@ Para agregar a la barra de status utilizar el comando `tshort list`
 
 ## TODO
 - [ ] Permitir editar las keys (Pedir input de teclas | fzf keybindings)
+- [ ] Configuracion para los projectos en lugar de un solo directorio

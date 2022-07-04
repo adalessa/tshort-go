@@ -1,4 +1,4 @@
-package cmd
+package commands
 
 type Runner interface {
 	Init([]string) error
